@@ -1,0 +1,19 @@
+{
+"name": "Arduino-SI4432",
+"frameworks": "Arduino",
+"keywords": "SI4430, SI4431, SI4432",
+"description": "Implement a driver for SILICON LABS SI443x, tested with module SI4432",
+"authors":
+[
+    {
+        "name": "nopnop2002",
+        "url": "",
+        "maintainer": true
+    },
+],
+"repository":
+{
+    "type": "git",
+    "url": "https://github.com/nopnop2002/Arduino-SI4432"
+}
+}
