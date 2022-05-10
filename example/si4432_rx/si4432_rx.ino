@@ -2,7 +2,7 @@
 
 #define RESPONCE 1
 
-Si4432 radio(10, 7, 2); // CH, SDN, IRQ
+Si4432 radio(10, 7, 2); // CS, SDN, IRQ
 
 
 void setup() {
