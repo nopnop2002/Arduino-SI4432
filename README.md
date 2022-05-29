@@ -3,8 +3,12 @@ Arduino library for SILICON LABS SI443x.
 
 I made it with reference to [this](https://github.com/ADiea/si4432).   
 
-![SI4432-433MHz-2 54mm](https://user-images.githubusercontent.com/6020549/163330289-770357cd-5bb4-4030-9347-edd0da6f21d3.JPG)
+- 2.54mm pitch 433MHz   
+ ![SI4432-433MHz-2 54mm](https://user-images.githubusercontent.com/6020549/163330289-770357cd-5bb4-4030-9347-edd0da6f21d3.JPG)
 
+- 1.27mm pitch 433MHz   
+ ![SI4432-433MHz-1 27mm](https://user-images.githubusercontent.com/6020549/170854841-ab5318ae-7b31-4d11-98d9-719f48a49c36.JPG)
+ Pinout is [here](http://www.dorji.com/docs/data/DRF4432F20.pdf).   
 
 # Changes from the original
 
@@ -17,8 +21,8 @@ I made it with reference to [this](https://github.com/ADiea/si4432).
 - Removed waitForPacket function.   
 
 - Added SyncWord validation.   
-Sync Word 3 reset value is 0x2D.   
-Sync Word 2 reset value is 0xD4.   
+ Sync Word 3 reset value is 0x2D.   
+ Sync Word 2 reset value is 0xD4.   
 
 - Added example code.   
 
