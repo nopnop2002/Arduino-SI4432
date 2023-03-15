@@ -242,7 +242,8 @@ void Si4432::setBaudRate(uint16_t kbps) {
 	_kbps = kbps;
 
 	byte freqDev = kbps <= 10 ? 15 : 150;		// 15khz / 150 khz
-	byte modulationValue = _kbps < 30 ? 0x4c : 0x0c;		// use FIFO Mode, GFSK, low baud mode on / off
+	//byte modulationValue = _kbps < 30 ? 0x4c : 0x0c;		// use FIFO Mode, GFSK, low baud mode on / off
+	byte modulationValue = _kbps < 30 ? 0x2c : 0x0c;		// use FIFO Mode, GFSK, low baud mode on / off
 
 	byte modulationVals[] = { modulationValue, 0x23, round((freqDev * 1000.0) / 625.0) }; // msb of the kpbs to 3rd bit of register
 	BurstWrite(REG_MODULATION_MODE1, modulationVals, 3); // 0x70
