@@ -26,8 +26,9 @@ void Si4432::setFrequency(unsigned long baseFrequencyMhz) {
 		highBand = 1;
 	}
 
-	double fPart = (baseFrequencyMhz / (10 * (highBand + 1))) - 24;
-
+	//double fPart = (baseFrequencyMhz / (10 * (highBand + 1))) - 24;
+	double fPart = ((double)baseFrequencyMhz / (10 * (highBand + 1))) - 24;
+	
 	uint8_t freqband = (uint8_t) fPart; // truncate the int
 
 	uint16_t freqcarrier = (fPart - freqband) * 64000;
