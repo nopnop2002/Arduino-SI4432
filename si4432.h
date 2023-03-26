@@ -16,6 +16,7 @@
 #ifndef si4432_H_
 #define si4432_H_
 #include "Arduino.h"
+#include <SPI.h>
 
 /* Now, according to the this design, you must
  * 1- Create an instance
@@ -28,12 +29,12 @@
 class Si4432 {
 public:
 
-	Si4432(uint8_t csPin, uint8_t sdnPin, uint8_t InterruptPin = 0); // when a InterruptPin is given, interrupts are checked with this pin - rather than SPI polling
+	Si4432(uint8_t csPin, uint8_t sdnPin = 0, uint8_t InterruptPin = 0); // when a InterruptPin is given, interrupts are checked with this pin - rather than SPI polling
 
 	void setFrequency(unsigned long baseFrequency); // sets the freq. call before boot
 	void setChannel(byte channel); // sets the channel. call before switching to tx or rx mode
 	void setBaudRate(uint16_t kbps); // sets the  bps. call before switching to tx or rx mode - min:1, max: 256
-	bool init();
+	bool init(SPIClass* spi = &SPI);
 	void setCommsSignature(uint16_t signature); // used to 'sign' packets with a predetermined signature - call before boot
 
 	bool sendPacket(uint8_t length, const byte* data); // switches to Tx mode and sends the package
@@ -64,6 +65,7 @@ protected:
 	};
 
 	uint8_t _csPin, _sdnPin, _intPin;
+	SPIClass* _spi;
 
 	uint64_t _freqCarrier;
 	uint8_t _freqChannel;
