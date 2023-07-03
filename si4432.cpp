@@ -1,7 +1,5 @@
 #include "si4432.h"
 
-#include <SPI.h>
-
 #define MAX_TRANSMIT_TIMEOUT 200
 // #define DEBUG
 
@@ -26,8 +24,9 @@ void Si4432::setFrequency(unsigned long baseFrequencyMhz) {
 		highBand = 1;
 	}
 
-	double fPart = (baseFrequencyMhz / (10 * (highBand + 1))) - 24;
-
+	//double fPart = (baseFrequencyMhz / (10 * (highBand + 1))) - 24;
+	double fPart = ((double)baseFrequencyMhz / (10 * (highBand + 1))) - 24;
+	
 	uint8_t freqband = (uint8_t) fPart; // truncate the int
 
 	uint16_t freqcarrier = (fPart - freqband) * 64000;
@@ -53,22 +52,25 @@ void Si4432::setCommsSignature(uint16_t signature) {
 #endif
 }
 
-bool Si4432::init() {
-
+bool Si4432::init(SPIClass* spi) {
+	_spi = spi;
+	
 	if (_intPin != 0)
 		pinMode(_intPin, INPUT);
 
-	pinMode(_sdnPin, OUTPUT);
-	turnOff();
+	if(_sdnPin != 0) {
+		pinMode(_sdnPin, OUTPUT);
+		turnOff();
+	} else delay(50);
 
 	pinMode(_csPin, OUTPUT);
 	digitalWrite(_csPin, HIGH); // set pin high, so chip would know we don't use it. - well, it's turned off anyway but...
 
-	SPI.begin();
+	_spi->begin();
 	//remove regacy mode
-	//SPI.setBitOrder(MSBFIRST);
-	//SPI.setClockDivider(SPI_CLOCK_DIV16); // 16/ 2 = 8 MHZ. Max. is 10 MHZ, so we're cool.
-	//SPI.setDataMode(SPI_MODE0);
+	//_spi->setBitOrder(MSBFIRST);
+	//_spi->setClockDivider(SPI_CLOCK_DIV16); // 16/ 2 = 8 MHZ. Max. is 10 MHZ, so we're cool.
+	//_spi->setDataMode(SPI_MODE0);
 
 #ifdef DEBUG
 	Serial.println("SPI is initialized now.");
@@ -182,7 +184,8 @@ bool Si4432::sendPacket(uint8_t length, const byte* data) {
 	}
 #endif
 
-	hardReset(); // nop
+	if(_sdnPin != 0) hardReset(); // nop
+	else softReset();
 
 	return false;
 }
@@ -240,7 +243,8 @@ void Si4432::setBaudRate(uint16_t kbps) {
 	_kbps = kbps;
 
 	byte freqDev = kbps <= 10 ? 15 : 150;		// 15khz / 150 khz
-	byte modulationValue = _kbps < 30 ? 0x4c : 0x0c;		// use FIFO Mode, GFSK, low baud mode on / off
+	//byte modulationValue = _kbps < 30 ? 0x4c : 0x0c;		// use FIFO Mode, GFSK, low baud mode on / off
+	byte modulationValue = _kbps < 30 ? 0x2c : 0x0c;		// use FIFO Mode, GFSK, low baud mode on / off
 
 	byte modulationVals[] = { modulationValue, 0x23, round((freqDev * 1000.0) / 625.0) }; // msb of the kpbs to 3rd bit of register
 	BurstWrite(REG_MODULATION_MODE1, modulationVals, 3); // 0x70
@@ -318,8 +322,8 @@ void Si4432::BurstWrite(Registers startReg, const byte value[], uint8_t length) 
 	byte regVal = (byte) startReg | 0x80; // set MSB
 
 	digitalWrite(_csPin, LOW);
-	SPI.beginTransaction(SPISettings(8000000, MSBFIRST, SPI_MODE0));
-	SPI.transfer(regVal);
+	_spi->beginTransaction(SPISettings(8000000, MSBFIRST, SPI_MODE0));
+	_spi->transfer(regVal);
 
 	for (byte i = 0; i < length; ++i) {
 #ifdef DEBUG
@@ -328,12 +332,12 @@ void Si4432::BurstWrite(Registers startReg, const byte value[], uint8_t length) 
 		Serial.print(" | ");
 		Serial.println(value[i], HEX);
 #endif
-		SPI.transfer(value[i]);
+		_spi->transfer(value[i]);
 
 	}
 
 	digitalWrite(_csPin, HIGH);
-	SPI.endTransaction();
+	_spi->endTransaction();
 }
 
 void Si4432::BurstRead(Registers startReg, byte value[], uint8_t length) {
@@ -341,11 +345,11 @@ void Si4432::BurstRead(Registers startReg, byte value[], uint8_t length) {
 	byte regVal = (byte) startReg & 0x7F; // clear MSB
 
 	digitalWrite(_csPin, LOW);
-	SPI.beginTransaction(SPISettings(8000000, MSBFIRST, SPI_MODE0));
-	SPI.transfer(regVal);
+	_spi->beginTransaction(SPISettings(8000000, MSBFIRST, SPI_MODE0));
+	_spi->transfer(regVal);
 
 	for (byte i = 0; i < length; ++i) {
-		value[i] = SPI.transfer(0xFF);
+		value[i] = _spi->transfer(0xFF);
 
 #ifdef DEBUG
 		Serial.print("Reading: ");
@@ -356,7 +360,7 @@ void Si4432::BurstRead(Registers startReg, byte value[], uint8_t length) {
 	}
 
 	digitalWrite(_csPin, HIGH);
-	SPI.endTransaction();
+	_spi->endTransaction();
 }
 
 void Si4432::readAll() {
@@ -404,8 +408,10 @@ void Si4432::softReset() {
 
 void Si4432::hardReset() {
 	// toggle Shutdown Pin
-	turnOff();
-	turnOn();
+	if(_sdnPin != 0) {
+		turnOff();
+		turnOn();
+	}
 
 	byte reg = ReadRegister(REG_INT_STATUS2);
 	while ((reg & 0x02) != 0x02) {

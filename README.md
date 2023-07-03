@@ -13,6 +13,7 @@ I made it with reference to [this](https://github.com/ADiea/si4432).
 # Changes from the original
 
 - Changed legacy SPI communication to SPI communication with transactions.   
+ Legacy SPI communication works fine on ATMega with fixed CPU frequency, but doesn't work on CPUs like STM32 due to overclocking.   
 
 - Added CS pin parameters to the constructor.   
 
