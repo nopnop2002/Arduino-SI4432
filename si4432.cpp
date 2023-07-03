@@ -211,10 +211,8 @@ void Si4432::switchMode(byte mode) {
 	ChangeRegister(REG_STATE, mode); // receive mode
 #ifdef DEBUG
 	byte val = ReadRegister(REG_DEV_STATUS);
-	if (val == 0 || val == 0xFF) {
-		Serial.print(val, HEX);
-		Serial.println(" -- WHAT THE HELL!!");
-	}
+	Serial.print("REG_DEV_STATUS=");
+	Serial.println(val, HEX);
 #endif
 }
 
