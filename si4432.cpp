@@ -1,41 +1,74 @@
 #include "si4432.h"
 
-#define MAX_TRANSMIT_TIMEOUT 200
-// #define DEBUG
+#define MAX_TRANSMIT_TIMEOUT 200 // [ms]
+//#define DEBUG // note: readback of registers and serial output will slow down operations
 
 //values here are kept in khz x 10 format (for not to deal with decimals) - look at AN440 page 26 for whole table
-const uint16_t IFFilterTable[][2] = { { 322, 0x26 }, { 3355, 0x88 }, { 3618, 0x89 }, { 4202, 0x8A }, { 4684, 0x8B }, {
-		5188, 0x8C }, { 5770, 0x8D }, { 6207, 0x8E } };
+const uint16_t IFFilterTable[][2] = { {  322, 0x26 },
+                                      { 3355, 0x88 },
+                                      { 3618, 0x89 },
+                                      { 4202, 0x8A },
+                                      { 4684, 0x8B },
+                                      {	5188, 0x8C },
+                                      { 5770, 0x8D },
+                                      { 6207, 0x8E }
+                                    };
 
-Si4432::Si4432(uint8_t csPin, uint8_t sdnPin, uint8_t InterruptPin) :
-		_csPin(csPin), _sdnPin(sdnPin), _intPin(InterruptPin), _freqCarrier(433000000), _freqChannel(0), _kbps(100), _packageSign(
-				0xDEAD) { // default is 450 mhz
-
+Si4432::Si4432(uint8_t csPin, uint8_t sdnPin, uint8_t intPin) :
+		_csPin(csPin),
+		_sdnPin(sdnPin),
+		_intPin(intPin),
+		_spi(nullptr),
+		_freqCarrier(433.0),
+		_freqChannel(0),
+		_kbps(100),
+		_packageSign(0xDEAD),
+		_spiClock(0),
+		_modulationType(GFSK),
+		_configCallback(nullptr),
+		_idleMode(Ready),
+		_transmitPower(7),
+		_directTie(true),
+		_manchesterEnabled(false),
+		_manchesterInverted(false),
+		_packetHandlingEnabled(true),
+		_lsbFirst(false),
+		_sendBlocking(true),
+		_sendStart(0) {
 }
 
-void Si4432::setFrequency(unsigned long baseFrequencyMhz) {
+void Si4432::setFrequency(int frequency) {
+	setFrequency((double)frequency);
+}
 
-	if ((baseFrequencyMhz < 240) || (baseFrequencyMhz > 930))
+void Si4432::setFrequency(unsigned long frequency) {
+	setFrequency((double)frequency);
+}
+
+void Si4432::setFrequency(double frequency) {
+
+	if ((frequency < 240) || (frequency > 930))
 		return; // invalid frequency
 
-	_freqCarrier = baseFrequencyMhz;
+	_freqCarrier = frequency;
+
 	byte highBand = 0;
-	if (baseFrequencyMhz >= 480) {
+	if (frequency >= 480) {
 		highBand = 1;
 	}
 
-	//double fPart = (baseFrequencyMhz / (10 * (highBand + 1))) - 24;
-	double fPart = ((double)baseFrequencyMhz / (10 * (highBand + 1))) - 24;
-	
-	uint8_t freqband = (uint8_t) fPart; // truncate the int
+	float fPart = frequency / (10 * (highBand + 1)) - 24;
 
-	uint16_t freqcarrier = (fPart - freqband) * 64000;
+	uint8_t freqBand = (uint8_t)fPart; // truncate the int
 
-	// sideband is always on (0x40) :
-	byte vals[3] = { 0x40 | (highBand << 5) | (freqband & 0x3F), freqcarrier >> 8, freqcarrier & 0xFF };
+	uint16_t freqCarrier = (fPart - freqBand) * 64000;
 
+	// rx sideband is always on (bit 6)
+	byte vals[3] = { (byte)((1 << 6) | (highBand << 5) | (freqBand & 0x3F)),
+	                 (byte)(freqCarrier >> 8),
+	                 (byte)(freqCarrier & 0xFF)
+	               };
 	BurstWrite(REG_FREQBAND, vals, 3);
-
 }
 
 void Si4432::setCommsSignature(uint16_t signature) {
@@ -52,37 +85,42 @@ void Si4432::setCommsSignature(uint16_t signature) {
 #endif
 }
 
-bool Si4432::init(SPIClass* spi) {
+bool Si4432::init(SPIClass* spi, uint32_t spiClock) {
 	_spi = spi;
-	
-	if (_intPin != 0)
+	_spiClock = spiClock;
+
+	if (_intPin != 0xFF)
+	{
 		pinMode(_intPin, INPUT);
+	}
 
-	if(_sdnPin != 0) {
+	if (_sdnPin != 0xFF) {
 		pinMode(_sdnPin, OUTPUT);
-		turnOff();
-	} else delay(50);
+		digitalWrite(_sdnPin, LOW); // turn chip on
+	} else {
+		delay(50); // why wait so long?
+	}
 
-	pinMode(_csPin, OUTPUT);
-	digitalWrite(_csPin, HIGH); // set pin high, so chip would know we don't use it. - well, it's turned off anyway but...
+	if (_csPin != 0xFF) {
+		pinMode(_csPin, OUTPUT);
+		digitalWrite(_csPin, HIGH); // set SPI CS pin high, so chip would know we don't use it
+	}
 
 	_spi->begin();
-	//remove regacy mode
-	//_spi->setBitOrder(MSBFIRST);
-	//_spi->setClockDivider(SPI_CLOCK_DIV16); // 16/ 2 = 8 MHZ. Max. is 10 MHZ, so we're cool.
-	//_spi->setDataMode(SPI_MODE0);
 
 #ifdef DEBUG
 	Serial.println("SPI is initialized now.");
 #endif
 
-	hardReset();
-	
+	reset();
+
 	// Check Sync Word
 	byte syncWord3 = ReadRegister(REG_SYNC_WORD3);
 	byte syncWord2 = ReadRegister(REG_SYNC_WORD2);
 	byte syncWord1 = ReadRegister(REG_SYNC_WORD1);
 	byte syncWord0 = ReadRegister(REG_SYNC_WORD0);
+
+#ifdef DEBUG
 	Serial.print("syncWord3=");
 	Serial.print(syncWord3, HEX);
 	Serial.print(" syncWord2=");
@@ -92,104 +130,137 @@ bool Si4432::init(SPIClass* spi) {
 	Serial.print(" syncWord0=");
 	Serial.print(syncWord0, HEX);
 	Serial.println();
-	
-	if (syncWord3 != 0x2D || syncWord2 != 0xD4) return false;
-	return true;
+#endif
+
+	if (syncWord3 != 0x2D || syncWord2 != 0xD4 || syncWord1 != 0 || syncWord0 != 0)
+		return false;
+	else
+		return true;
+
+	if (getDeviceStatus() & 0x4)
+	{
+		// frequency error
+		return false;
+	}
 }
 
 void Si4432::boot() {
 	/*
 	 byte currentFix[] = { 0x80, 0x40, 0x7F };
 	 BurstWrite(REG_CHARGEPUMP_OVERRIDE, currentFix, 3); // refer to AN440 for reasons
-
-	 ChangeRegister(REG_GPIO0_CONF, 0x0F); // tx/rx data clk pin
-	 ChangeRegister(REG_GPIO1_CONF, 0x00); // POR inverted pin
-	 ChangeRegister(REG_GPIO2_CONF, 0x1C); // clear channel pin
 	 */
+
 	ChangeRegister(REG_AFC_TIMING_CONTROL, 0x02); // refer to AN440 for reasons
 	ChangeRegister(REG_AFC_LIMITER, 0xFF); // write max value - excel file did that.
 	ChangeRegister(REG_AGC_OVERRIDE, 0x60); // max gain control
 	ChangeRegister(REG_AFC_LOOP_GEARSHIFT_OVERRIDE, 0x3C); // turn off AFC
-	ChangeRegister(REG_DATAACCESS_CONTROL, 0xAD); // enable rx packet handling, enable tx packet handling, enable CRC, use CRC-IBM
-	ChangeRegister(REG_HEADER_CONTROL1, 0x0C); // no broadcast address control, enable check headers for bytes 3 & 2
-	ChangeRegister(REG_HEADER_CONTROL2, 0x22);  // enable headers byte 3 & 2, no fixed package length, sync word 3 & 2
-	ChangeRegister(REG_PREAMBLE_LENGTH, 0x08); // 8 * 4 bits = 32 bits (4 bytes) preamble length
-	ChangeRegister(REG_PREAMBLE_DETECTION, 0x3A); // validate 7 * 4 bits of preamble  in a package
-	ChangeRegister(REG_SYNC_WORD3, 0x2D); // sync byte 3 val
-	ChangeRegister(REG_SYNC_WORD2, 0xD4); // sync byte 2 val
 
-	ChangeRegister(REG_TX_POWER, 0x1F); // max power
+	if (_packetHandlingEnabled) {
+		ChangeRegister(REG_DATAACCESS_CONTROL, 0xAD | (_lsbFirst? 1 << 6 : 0)); // enable rx packet handling, enable tx packet handling, enable CRC, use CRC-IBM
+		ChangeRegister(REG_HEADER_CONTROL1, 0x0C); // no broadcast address control, enable check headers for bytes 3 & 2
+		ChangeRegister(REG_HEADER_CONTROL2, 0x22); // enable headers byte 3 & 2, no fixed package length, sync word 3 & 2
+		ChangeRegister(REG_PREAMBLE_LENGTH, 0x08); // 8 * 4 bits = 32 bits (4 bytes) preamble length
+		ChangeRegister(REG_PREAMBLE_DETECTION, 0x3A); // validate 7 * 4 bits of preamble in a package
+		setCommsSignature(_packageSign); // default signature
+	} else {
+		ChangeRegister(REG_DATAACCESS_CONTROL, _lsbFirst? 1 << 6 : 0); // disable packet handling
+	}
 
-	ChangeRegister(REG_CHANNEL_STEPSIZE, 0x64); // each channel is of 1 Mhz interval
+	ChangeRegister(REG_CHANNEL_STEPSIZE, 0x64); // each channel is of 100 * 10 kHz = 1 MHz interval
 
-	setFrequency(_freqCarrier); // default freq
-	setBaudRate(_kbps); // default baud rate is 100kpbs
-	setChannel(_freqChannel); // default channel is 0
-	setCommsSignature(_packageSign); // default signature
+	// backup current settings
+	byte oldTransmitPower = _transmitPower;
+	_transmitPower = 0;
+	float oldFreqCarrier = _freqCarrier;
+	_freqCarrier = 0;
+	float oldKbps = _kbps;
+	_kbps = 0;
+	uint8_t oldFreqChannel = _freqChannel;
+	_freqChannel = 0;
 
-	switchMode(Ready);
+	if (_configCallback) {
+		_configCallback();
+	}
 
+	// perform missing config
+	if (_transmitPower == 0)
+		setTransmitPower(oldTransmitPower, _directTie); // default max power, direct-tie enabled
+	if (_freqCarrier == 0)
+  	setFrequency(oldFreqCarrier); // default freq is 433 MHz
+	if (_kbps == 0)
+  	setBaudRate(oldKbps); // default baud rate is 100 kpbs
+	if (_freqChannel == 0)
+	  setChannel(oldFreqChannel); // default channel is 0
+
+	switchMode(_idleMode);
 }
-
 
 bool Si4432::sendPacket(uint8_t length, const byte* data) {
 
-	clearTxFIFO();
-	ChangeRegister(REG_PKG_LEN, length);
+	bool result = false;
 
-	BurstWrite(REG_FIFO, data, length);
+	if (length <= 64) {
+		if (length)	{
+			// write data into FIFO
+			clearTxFIFO();
+			ChangeRegister(REG_PKG_LEN, length);
+			BurstWrite(REG_FIFO, data, length);
+		}
 
-	ChangeRegister(REG_INT_ENABLE1, 0x04); // set interrupts on for package sent
-	ChangeRegister(REG_INT_ENABLE2, 0x00); // set interrupts off for anything else
-	//read interrupt registers to clean them
-	ReadRegister(REG_INT_STATUS1);
-	ReadRegister(REG_INT_STATUS2);
+    // enable interrupt for package sent
+    enableInt(INT_PKSENT);
 
-	switchMode(TXMode | Ready);
+		// read interrupt registers to clean them
+		getIntStatus();
 
-	uint64_t enterMillis = millis();
- 
-	while (millis() - enterMillis < MAX_TRANSMIT_TIMEOUT) {
+		// start transmit (will automatically return to previously assigned mode after transmit is completed)
+		switchMode(_idleMode | TXMode);
+		_sendStart = millis();
 
-		if ((_intPin != 0) && (digitalRead(_intPin) != 0)) {
+		// wait for transmit to complete
+		result = true;
+		if (_sendBlocking) {
+			result = waitTransmitCompleted();
+			if (!result) {
+				// transmit timeout, reset
+				reset();
+			}
+		}
+	}
+
+	return result;
+}
+
+bool Si4432::waitTransmitCompleted() {
+	while (millis() - _sendStart < MAX_TRANSMIT_TIMEOUT) {
+
+		// check interrupt pin if configured
+		if (_intPin != 0xFF && digitalRead(_intPin)) {
+			// no interrupt, wait
 			continue;
 		}
 
-		byte intStatus = ReadRegister(REG_INT_STATUS1);
-		//ReadRegister(REG_INT_STATUS2);
-//#ifdef DEBUG
-		Serial.print("sendPacket REG_INT_STATUS1=");
+		// typical state change without interrupt signal:
+		// 0x20 (TX enabled: FIFO almost empty = itxffaem) -> 0x80 (TX FIFO empty = ifferr) -> 0xA0 (itxffaem + ifferr) -> 0xA4 (packet send, ipksent)
+		uint16_t intStatus = getIntStatus();
+#ifdef DEBUG
+		Serial.print("sendPacket REG_INT_STATUS=");
 		Serial.println(intStatus, HEX);
-//#endif
-		
-		//if (intStatus & 0x04) { // Packet Sent Interrupt
-		if ( (intStatus & 0x04) == 0x04 || (intStatus & 0x20) == 0x20) { // TX FIFO Almost Empty.
-			//switchMode(Ready | TuneMode);
-			//Serial.println("softReset");
-			softReset(); // nop
-			return true;
-		} // endif
-		yield();
-	} // end while
-
-	//timeout occurred.
-//#ifdef DEBUG
-	Serial.println("Timeout in Transit -- ");
-//#endif
-#if 0
-	switchMode(Ready);
-
-	if (ReadRegister(REG_DEV_STATUS) & 0x80) {
-		clearFIFO();
-	}
 #endif
+		if (intStatus & INT_PKSENT) {
+			return true;
+		}
 
-	if(_sdnPin != 0) hardReset(); // nop
-	else softReset();
+		delay(1);
+	}
+
+	// timeout
+#ifdef DEBUG
+	Serial.println("Transmit Timeout --");
+#endif
 
 	return false;
 }
-
 
 void Si4432::getPacketReceived(uint8_t* length, byte* readData) {
 
@@ -201,9 +272,7 @@ void Si4432::getPacketReceived(uint8_t* length, byte* readData) {
 }
 
 void Si4432::setChannel(byte channel) {
-
 	ChangeRegister(REG_FREQCHANNEL, channel);
-
 }
 
 void Si4432::switchMode(byte mode) {
@@ -211,11 +280,16 @@ void Si4432::switchMode(byte mode) {
 	Serial.print("switchMode mode=0x");
 	Serial.println(mode, HEX);
 #endif
-	ChangeRegister(REG_STATE, mode); // receive mode
-#ifdef DEBUG
-	byte val = ReadRegister(REG_DEV_STATUS);
-	Serial.print("REG_DEV_STATUS=");
-	Serial.println(val, HEX);
+	ChangeRegister(REG_STATE, mode); // operation mode
+#ifdef XDEBUG
+	byte val = getDeviceStatus();
+	if (val == 0 || val == 0xFF) {
+		Serial.print(val, HEX);
+		Serial.println(" -- WHAT THE HELL!!");
+	} else if (val & 0x4) {
+		// frequency error
+		Serial.print("switchMode freqerr");
+	}
 #endif
 }
 
@@ -226,42 +300,62 @@ void Si4432::ChangeRegister(Registers reg, byte value) {
 	byte _value;
 	BurstRead(reg, &_value, 1);
 	if (value != _value) {
-		Serial.println("ChangeRegister Fail");
+		Serial.println("ChangeRegister failed");
 		Serial.print("reg=0x");
 		Serial.print(reg, HEX);
 		Serial.print(" value=0x");
-		Serial.println(value, HEX);
+		Serial.println(_value, HEX);
 	}
 #endif
 }
 
+void Si4432::setBaudRate(int kbps) {
+	setBaudRate((double)kbps);
+}
+
 void Si4432::setBaudRate(uint16_t kbps) {
+	setBaudRate((double)kbps);
+}
+
+void Si4432::setBaudRate(double kbps) {
 
 	// chip normally supports very low bps values, but they are cumbersome to implement - so I just didn't implement lower bps values
-	if ((kbps > 256) || (kbps < 1))
+	if ((kbps < 1) || (kbps > 256))
 		return;
+
 	_kbps = kbps;
 
-	byte freqDev = kbps <= 10 ? 15 : 150;		// 15khz / 150 khz
-	//byte modulationValue = _kbps < 30 ? 0x4c : 0x0c;		// use FIFO Mode, GFSK, low baud mode on / off
-	byte modulationValue = _kbps < 30 ? 0x2c : 0x0c;		// use FIFO Mode, GFSK, low baud mode on / off
+	// set modulation (GFSK or OOK) and frequency deviation
+	byte modulationMode1 = (kbps < 30 ? 1 << 5 : 0) | (_manchesterInverted? 1 << 2 : 0) | (_manchesterEnabled? 1 << 1 : 0); // txdtrtscale (bit 5), enmaninv (bit2), enmanch (bit 1)
+	byte modulationMode2 = _modulationType == OOK? 0x21 : 0x23;  // 0x20 = dtmod = FIFO, 0x01 = modtyp = OOK, 0x03 = modtyp = GFSK
+	byte freqDev = round(((kbps <= 10 ? 15 : 150) * 1000.0) / 625.0);	// 15kHz / 150 kHz, msb of kpbs to 3rd bit of register
 
-	byte modulationVals[] = { modulationValue, 0x23, round((freqDev * 1000.0) / 625.0) }; // msb of the kpbs to 3rd bit of register
+	byte modulationVals[] = { modulationMode1,
+	                          modulationMode2,
+	                          freqDev
+	                        };
 	BurstWrite(REG_MODULATION_MODE1, modulationVals, 3); // 0x70
 
-	// set data rate
-	uint16_t bpsRegVal = round((kbps * (kbps < 30 ? 2097152 : 65536.0)) / 1000.0);
-	byte datarateVals[] = { bpsRegVal >> 8, bpsRegVal & 0xFF };
-
+	// set tx data rate
+	uint16_t bpsRegVal = round((kbps * (kbps < 30 ? 1 << 21 : 1 << 16)) / 1000);
+#ifdef DEBUG
+	Serial.print("kbps: ");
+	Serial.println(kbps);
+	Serial.print("tx rate reg value: ");
+	Serial.println(bpsRegVal, HEX);
+#endif
+	byte datarateVals[] = { (byte)(bpsRegVal >> 8),
+	                        (byte)(bpsRegVal & 0xFF)
+	                      };
 	BurstWrite(REG_TX_DATARATE1, datarateVals, 2); // 0x6E
 
-	//now set the timings
-	uint16_t minBandwidth = (2 * (uint32_t) freqDev) + kbps;
+	// set rx timings
+	uint16_t minBandwidth = (uint16_t)(freqDev << 1) + (uint16_t)round(kbps);
 #ifdef DEBUG
 	Serial.print("min Bandwidth value: ");
 	Serial.println(minBandwidth, HEX);
 #endif
-	byte IFValue = 0xff;
+	byte IFValue = 0xFF;
 	//since the table is ordered (from low to high), just find the 'minimum bandwidth which is greater than required'
 	for (byte i = 0; i < 8; ++i) {
 		if (IFFilterTable[i][0] >= (minBandwidth * 10)) {
@@ -279,11 +373,11 @@ void Si4432::setBaudRate(uint16_t kbps) {
 	byte dwn3_bypass = (IFValue & 0x80) ? 1 : 0; // if msb is set
 	byte ndec_exp = (IFValue >> 4) & 0x07; // only 3 bits
 
-	uint16_t rxOversampling = round((500.0 * (1 + 2 * dwn3_bypass)) / ((pow(2, ndec_exp - 3)) * (double ) kbps));
+	uint16_t rxOversampling = round((500.0 * (1 + 2 * dwn3_bypass)) / ((pow(2, ndec_exp - 3)) * kbps));
 
-	uint32_t ncOffset = ceil(((double) kbps * (pow(2, ndec_exp + 20))) / (500.0 * (1 + 2 * dwn3_bypass)));
+	uint32_t ncOffset = ceil((kbps * (pow(2, ndec_exp + 20))) / (500.0 * (1 + 2 * dwn3_bypass)));
 
-	uint16_t crGain = 2 + ((65535 * (int64_t) kbps) / ((int64_t) rxOversampling * freqDev));
+	uint16_t crGain = 2 + ((65535 * (int64_t)kbps) / ((int64_t) rxOversampling * freqDev));
 	byte crMultiplier = 0x00;
 	if (crGain > 0x7FF) {
 		crGain = 0x7FF;
@@ -301,14 +395,16 @@ void Si4432::setBaudRate(uint16_t kbps) {
 	Serial.println(crGain, HEX);
 	Serial.print("crMultiplier value: ");
 	Serial.println(crMultiplier, HEX);
-
 #endif
 
-	byte timingVals[] = { rxOversampling & 0x00FF, ((rxOversampling & 0x0700) >> 3) | ((ncOffset >> 16) & 0x0F),
-			(ncOffset >> 8) & 0xFF, ncOffset & 0xFF, ((crGain & 0x0700) >> 8) | crMultiplier, crGain & 0xFF };
-
+	byte timingVals[] = { (byte)(rxOversampling & 0xFF),
+	                      (byte)(((rxOversampling & 0x0700) >> 3) | ((ncOffset >> 16) & 0x0F)),
+	                      (byte)((ncOffset >> 8) & 0xFF),
+	                      (byte)(ncOffset & 0xFF),
+	                      (byte)(((crGain & 0x0700) >> 8) | crMultiplier),
+	                      (byte)(crGain & 0xFF)
+	                    };
 	BurstWrite(REG_CLOCK_RECOVERY_OVERSAMPLING, timingVals, 6);
-
 }
 
 byte Si4432::ReadRegister(Registers reg) {
@@ -321,22 +417,25 @@ void Si4432::BurstWrite(Registers startReg, const byte value[], uint8_t length) 
 
 	byte regVal = (byte) startReg | 0x80; // set MSB
 
-	digitalWrite(_csPin, LOW);
-	_spi->beginTransaction(SPISettings(8000000, MSBFIRST, SPI_MODE0));
+	if (_csPin != 0xFF) {
+		digitalWrite(_csPin, LOW);
+	}
+	_spi->beginTransaction(SPISettings(_spiClock, MSBFIRST, SPI_MODE0));
 	_spi->transfer(regVal);
 
 	for (byte i = 0; i < length; ++i) {
 #ifdef DEBUG
-		Serial.print("Writing: ");
+		Serial.print("  writing: ");
 		Serial.print((regVal != 0xFF ? (regVal + i) & 0x7F : 0x7F), HEX);
 		Serial.print(" | ");
 		Serial.println(value[i], HEX);
 #endif
 		_spi->transfer(value[i]);
-
 	}
 
-	digitalWrite(_csPin, HIGH);
+	if (_csPin != 0xFF) {
+		digitalWrite(_csPin, HIGH);
+	}
 	_spi->endTransaction();
 }
 
@@ -344,22 +443,26 @@ void Si4432::BurstRead(Registers startReg, byte value[], uint8_t length) {
 
 	byte regVal = (byte) startReg & 0x7F; // clear MSB
 
-	digitalWrite(_csPin, LOW);
-	_spi->beginTransaction(SPISettings(8000000, MSBFIRST, SPI_MODE0));
+	if (_csPin != 0xFF) {
+		digitalWrite(_csPin, LOW);
+	}
+	_spi->beginTransaction(SPISettings(_spiClock, MSBFIRST, SPI_MODE0));
 	_spi->transfer(regVal);
 
 	for (byte i = 0; i < length; ++i) {
 		value[i] = _spi->transfer(0xFF);
 
 #ifdef DEBUG
-		Serial.print("Reading: ");
+		Serial.print("  reading: ");
 		Serial.print((regVal != 0x7F ? (regVal + i) & 0x7F : 0x7F), HEX);
 		Serial.print(" | ");
 		Serial.println(value[i], HEX);
 #endif
 	}
 
-	digitalWrite(_csPin, HIGH);
+	if (_csPin != 0xFF) {
+		digitalWrite(_csPin, HIGH);
+	}
 	_spi->endTransaction();
 }
 
@@ -369,13 +472,14 @@ void Si4432::readAll() {
 
 	BurstRead(REG_DEV_TYPE, allValues, 0x7F);
 
+#ifdef DEBUG
 	for (byte i = 0; i < 0x7f; ++i) {
 		Serial.print("REG(");
 		Serial.print((int) REG_DEV_TYPE + i, HEX);
 		Serial.print(") : ");
 		Serial.println((int) allValues[i], HEX);
 	}
-
+#endif
 }
 
 void Si4432::clearTxFIFO() {
@@ -394,29 +498,29 @@ void Si4432::clearFIFO() {
 }
 
 void Si4432::softReset() {
-	ChangeRegister(REG_STATE, 0x01);
-	ChangeRegister(REG_STATE, 0x80);
-
-	byte reg = ReadRegister(REG_INT_STATUS2);
-	while ((reg & 0x02) != 0x02) {
-		delay(1);
-		reg = ReadRegister(REG_INT_STATUS2);
-	}
-
-	boot();
+	reset(true);
 }
 
 void Si4432::hardReset() {
-	// toggle Shutdown Pin
-	if(_sdnPin != 0) {
+	reset();
+}
+
+void Si4432::reset(bool soft) {
+	if (soft || _sdnPin == 0xFF) {
+		// soft reset command
+		switchMode(Ready);
+		switchMode(Reset);
+	} else {
+		// toggle shutdown pin off/on
 		turnOff();
+		delay(1);
 		turnOn();
+		delay(17);
 	}
 
-	byte reg = ReadRegister(REG_INT_STATUS2);
-	while ((reg & 0x02) != 0x02) {
+	// wait for clock to become ready (changing registers will not work without it)
+	while (!isClockReady()) {
 		delay(1);
-		reg = ReadRegister(REG_INT_STATUS2);
 	}
 
 	boot();
@@ -426,67 +530,58 @@ void Si4432::startListening() {
 
 	clearRxFIFO(); // clear first, so it doesn't overflow if packet is big
 
-	ChangeRegister(REG_INT_ENABLE1, 0x03); // set interrupts on for package received and CRC error
-
+	// set interrupts on for package received and CRC error
 #ifdef DEBUG
-	ChangeRegister(REG_INT_ENABLE2, 0xC0);
+	enableInt(INT_SWDET | INT_PREAVAL | INT_PKVALID | INT_CRCERROR);
 #else
-	ChangeRegister(REG_INT_ENABLE2, 0x00); // set other interrupts off
+	enableInt(INT_PKVALID | INT_CRCERROR);
 #endif
-	//read interrupt registers to clean them
-	ReadRegister(REG_INT_STATUS1);
-	ReadRegister(REG_INT_STATUS2);
 
-	switchMode(RXMode | Ready);
+	//read interrupt registers to clean them
+	getIntStatus();
+
+	switchMode(_idleMode | RXMode);
 }
 
 bool Si4432::isPacketReceived() {
 
-	if ((_intPin != 0) && (digitalRead(_intPin) != 0)) {
+	if ((_intPin != 0xFF) && (digitalRead(_intPin) != 0)) {
 		return false; // if no interrupt occurred, no packet received is assumed (since startListening will be called prior, this assumption is enough)
 	}
 	// check for package received status interrupt register
-	byte intStat = ReadRegister(REG_INT_STATUS1);
+	uint16_t intStat = getIntStatus();
 #ifdef DEBUG
-	Serial.print("isPacketReceived REG_INT_STATUS1=");
-	Serial.println(REG_INT_STATUS1, HEX);
-#endif
+	Serial.print("isPacketReceived REG_INT_STATUS=");
+	Serial.println(intStat, HEX);
 
-#ifdef DEBUG
-	byte intStat2 = ReadRegister(REG_INT_STATUS2);
-
-	if (intStat2 & 0x40) { //interrupt occurred, check it && read the Interrupt Status1 register for 'preamble '
+	if (intStat & INT_PREAVAL) { //interrupt occurred, check it && read the Interrupt Status1 register for 'preamble '
 
 		Serial.print("HEY!! HEY!! Valid Preamble detected -- ");
-		Serial.println(intStat2, HEX);
 
 	}
 
-	if (intStat2 & 0x80) { //interrupt occurred, check it && read the Interrupt Status1 register for 'preamble '
+	if (intStat & INT_SWDET) { //interrupt occurred, check it && read the Interrupt Status1 register for 'preamble '
 
 		Serial.print("HEY!! HEY!! SYNC WORD detected -- ");
-		Serial.println(intStat2, HEX);
 
 	}
-#else
-	ReadRegister(REG_INT_STATUS2);
 #endif
 
-	if (intStat & 0x02) { //interrupt occurred, check it && read the Interrupt Status1 register for 'valid packet'
-		switchMode(Ready | TuneMode); // if packet came, get out of Rx mode till the packet is read out. Keep PLL on for fast reaction
+	if (intStat & INT_PKVALID) { //interrupt occurred, check it && read the Interrupt Status1 register for 'valid packet'
+		switchMode(TuneMode); // if packet came, get out of Rx mode till the packet is read out. Keep PLL on for fast reaction
 #ifdef DEBUG
-				Serial.print("Packet detected -- ");
-				Serial.println(intStat, HEX);
+		Serial.print("Packet detected -- ");
+		Serial.println(intStat, HEX);
 #endif
 		return true;
-	} else if (intStat & 0x01) { // packet crc error
+	} else if (intStat & INT_CRCERROR) { // packet crc error
 		switchMode(Ready); // get out of Rx mode till buffers are cleared
-//#ifdef DEBUG
+#ifdef DEBUG
 		Serial.print("CRC Error in Packet detected!-- ");
 		Serial.println(intStat, HEX);
-//#endif
+#endif
 		clearRxFIFO();
-		switchMode(RXMode | Ready); // get back to work
+		switchMode(_idleMode | RXMode); // get back to work
 		return false;
 	}
 
@@ -496,11 +591,73 @@ bool Si4432::isPacketReceived() {
 }
 
 void Si4432::turnOn() {
-	digitalWrite(_sdnPin, LOW); // turn on the chip now
-	delay(20);
+	if (_sdnPin != 0xFF)
+		digitalWrite(_sdnPin, LOW); // turn on the chip
 }
 
 void Si4432::turnOff() {
-	digitalWrite(_sdnPin, HIGH); // turn off the chip now
-	delay(1);
+	if (_sdnPin != 0xFF)
+		digitalWrite(_sdnPin, HIGH); // turn off the chip
+	if (_csPin != 0xFF)
+		digitalWrite(_csPin, HIGH); // set SPI CS pin high, so chip would know we don't use it
+}
+
+uint8_t Si4432::getIntPin() const {
+	return _intPin;
+}
+
+uint16_t Si4432::getIntStatus() {
+
+  uint16_t intStatus;
+
+	BurstRead(REG_INT_STATUS1, (byte*)&intStatus, 2);
+
+  return intStatus;
+}
+
+void Si4432::enableInt(uint16_t flags)
+{
+	BurstWrite(REG_INT_ENABLE1, (byte*)&flags, 2);
+}
+
+void Si4432::setModulationType(ModulationType modulationType) {
+	_modulationType = modulationType;
+}
+
+void Si4432::setManchesterEncoding(bool enabled, bool inverted) {
+	_manchesterEnabled = enabled;
+	_manchesterInverted = inverted;
+}
+
+void Si4432::setPacketHandling(bool enabled, bool lsbFirst) {
+	_packetHandlingEnabled = enabled;
+	_lsbFirst = lsbFirst;
+}
+
+void Si4432::setConfigCallback(void (*callback)()) {
+	_configCallback = callback;
+}
+
+void Si4432::setTransmitPower(byte level, bool directTie) {
+	_transmitPower = min(level, 7);
+	_directTie = directTie;
+	ChangeRegister(REG_TX_POWER, 0x10 | (directTie? 1 << 4 : 0) | (level & 0x7));
+}
+
+void Si4432::setSendBlocking(bool enabled) {
+	_sendBlocking = enabled;
+}
+
+void Si4432::setIdleMode(byte mode) {
+	_idleMode = mode;
+}
+
+byte Si4432::getDeviceStatus()
+{
+	return ReadRegister(REG_DEV_STATUS);
+}
+
+bool Si4432::isClockReady()
+{
+	return ReadRegister(REG_INT_STATUS2) & 0x02;
 }
