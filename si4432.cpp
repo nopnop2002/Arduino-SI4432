@@ -18,14 +18,10 @@ Si4432::Si4432(uint8_t csPin, uint8_t sdnPin, uint8_t intPin) :
 		_csPin(csPin),
 		_sdnPin(sdnPin),
 		_intPin(intPin),
-		_spi(nullptr),
 		_freqCarrier(433.0),
-		_freqChannel(0),
 		_kbps(100),
-		_packageSign(0xDEAD),
-		_spiClock(0),
+		_freqChannel(0),
 		_modulationType(GFSK),
-		_configCallback(nullptr),
 		_idleMode(Ready),
 		_transmitPower(7),
 		_directTie(true),
@@ -34,7 +30,11 @@ Si4432::Si4432(uint8_t csPin, uint8_t sdnPin, uint8_t intPin) :
 		_packetHandlingEnabled(true),
 		_lsbFirst(false),
 		_sendBlocking(true),
-		_sendStart(0) {
+		_spi(nullptr),
+		_spiClock(0),
+		_packageSign(0xDEAD),
+		_sendStart(0),
+		_configCallback(nullptr) {
 }
 
 void Si4432::setFrequency(int frequency) {
