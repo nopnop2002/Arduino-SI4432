@@ -2,7 +2,7 @@
 
 This library version is an enhancement of the [origial GitHub project](https://github.com/ADiea/si4432) by ahmetipkin. 
 
-It can be an alternative to the [RadioHead library](http://www.airspayce.com/mikem/arduino/RadioHead) when you are focused on the Si443x and need a specific combination of parameters that are not supported by the RadioHeas library (e.g. Manchester encoding).
+It can be an alternative to the [RadioHead library](http://www.airspayce.com/mikem/arduino/RadioHead) when you are focused on the Si443x and need a specific combination of parameters that are not supported by the RadioHead library (e.g. Manchester encoding).
 
 ## Boards
 
