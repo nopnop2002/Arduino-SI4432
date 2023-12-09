@@ -186,41 +186,68 @@ public:
 		INT_PREAVAL  = 0x4000,
 	};
 
-	Si4432(uint8_t csPin, uint8_t sdnPin = 0xFF, uint8_t intPin = 0xFF); // when intPin is given, interrupts are checked with this pin - rather than SPI polling
+	// when intPin is given, interrupts are checked with this pin - rather than SPI polling
+	Si4432(uint8_t csPin, uint8_t sdnPin = 0xFF, uint8_t intPin = 0xFF);
 
-	uint8_t getIntPin() const; // get interrupt pin, returns 0xFF if not set - may be used to attach ISR
-	uint16_t getIntStatus(); // get interrupt flags, also clears pending interrupts - may be used in ISR
-	void enableInt(uint16_t flags); // enable interrupt sources, see enum INT - typically used internally
+	// get interrupt pin, returns 0xFF if not set - may be used to attach ISR
+	uint8_t getIntPin() const;
+	 // get interrupt flags, see enum INT, also clears pending interrupts - may be used in ISR
+	uint16_t getIntStatus();
+	// enable interrupt sources, see enum INT - typically used internally
+	void enableInt(uint16_t flags);
 
-	void setFrequency(int frequency); // sets the frequency [MHz], default 433 MHz - call before switching to tx or rx mode
-	void setFrequency(unsigned long frequency); // sets the frequency [MHz], default 433 MHz - call before switching to tx or rx mode
-	void setFrequency(double frequency); // sets the frequency [MHz], default 433 MHz - call before switching to tx or rx mode
-	void setChannel(byte channel); // select a 1 MHz channel rel. to the frequency, default 0 - call before switching to tx or rx mode
+	// sets the frequency [MHz], 240..930 MHz, default 433 MHz - call before switching to tx or rx mode
+	void setFrequency(int frequency);
+	// sets the frequency [MHz], 240..930 MHz, default 433 MHz - call before switching to tx or rx mode
+	void setFrequency(unsigned long frequency);
+	// sets the frequency [MHz], 240..930 MHz, default 433 MHz - call before switching to tx or rx mode
+	void setFrequency(double frequency);
+	// select a 1 MHz channel rel. to the frequency, 0..255, default 0 - call before switching to tx or rx mode
+	void setChannel(byte channel);
 
-	void setModulationType(ModulationType modulationType); // sets modulation type GFSK or OOK, default GFSK - call before setting baud rate
-	void setManchesterEncoding(bool enabled, bool inverted = false); // select Manachester encoding, default disabled
-	void setBaudRate(int kbps); // sets the kbps, 1..256, default 100 kbps - call before switching to tx or rx mode
-	void setBaudRate(uint16_t kbps); // sets the kbps, 1..256, default 100 kbps - call before switching to tx or rx mode
-	void setBaudRate(double kbps); // sets the kbps, 1..256, default 100 kbps - call before switching to tx or rx mode
+	// sets modulation type GFSK or OOK, default GFSK - call before setting baud rate
+	void setModulationType(ModulationType modulationType);
+	// select Manachester encoding, default disabled
+	void setManchesterEncoding(bool enabled, bool inverted = false);
+	// sets the bit rate, 1..256 kbps, default 100 kbps - call before switching to tx or rx mode
+	void setBaudRate(int kbps);
+	// sets the bit rate, 1..256 kbps, default 100 kbps - call before switching to tx or rx mode
+	void setBaudRate(uint16_t kbps);
+	// sets the bit rate, 0.123 .. 256 kbps, default 100 kbps - call before switching to tx or rx mode
+	void setBaudRate(double kbps);
 
-	void setPacketHandling(bool enabled, bool lsbFirst = false); // enables packet handling, default on - call before init/reset
-	void setCommsSignature(uint16_t signature); // set packet header value, default 0xDEAD - call before init/reset
+	// enables packet handling, default on - call before init/reset
+	void setPacketHandling(bool enabled, bool lsbFirst = false);
+	// set packet header value, default 0xDEAD - call before init/reset
+	void setCommsSignature(uint16_t signature);
 
-	void setConfigCallback(void (*callback)()); // user specific boot config - call before init/reset
-	bool init(SPIClass* spi = &SPI, uint32_t spiClock = 8000000); // also performs reset and boot to idle mode, spiClock ..10000000
+	// user specific boot config - call before init/reset
+	void setConfigCallback(void (*callback)());
+	// blocking, also performs reset and boot to idle mode, spiClock ..10000000
+	bool init(SPIClass* spi = &SPI, uint32_t spiClock = 8000000);
 
-	void setTransmitPower(byte level, bool directTie = true); // 0 (min) .. 7 (max), default 7 - call before switching to tx or rx mode
-	void setSendBlocking(bool enabled = true); // make sendPacket block until Tx has completed, default true - call before sendPacket
-	bool sendPacket(uint8_t length = 0, const byte* data = nullptr); // switches to Tx mode and sends the package, length 0..64, length = 0 repeats last package
-	bool waitTransmitCompleted(); // wait for Tx to complete, returns false on timeout
+	// 0 (min) .. 7 (max), default 7 - call before switching to tx or rx mode
+	void setTransmitPower(byte level, bool directTie = true);
+	// make sendPacket block until Tx has completed, default true - call before sendPacket
+	void setSendBlocking(bool enabled = true);
+	// switches to Tx mode and sends the package, length 0..64, length = 0 repeats last package
+	bool sendPacket(uint8_t length = 0, const byte* data = nullptr);
+	// wait for Tx to complete, also returns false on transmit timeout
+	bool waitTransmitCompleted();
 
-	void startListening(); // switch to Rx mode (don't block)
-	bool isPacketReceived(); // check for the packet received flags
-	void getPacketReceived(uint8_t* length, byte* readData); // read from FIFO
+	// switch to Rx mode (don't block)
+	void startListening();
+	// check for the packet received flags
+	bool isPacketReceived();
+	// read from FIFO
+	void getPacketReceived(uint8_t* length, byte* readData);
 
-	void switchMode(byte mode); // set operation mode
-	void setIdleMode(byte mode); // set idle operation mode for after exiting from boot, TX/FIFO or RX/single, default Ready - call before init/sendPacket/startListening
-	byte getDeviceStatus(); // freqerr (bit 3) should not be set
+	// set operation mode, see enum OperationMode
+	void switchMode(byte mode);
+	// set idle operation mode to use after completing boot, TX/FIFO or RX/single, StandbyMode/SleepMode/Ready/TuneMode, default Ready - call before init/sendPacket/startListening
+	void setIdleMode(byte mode);
+	// freqerr (bit 3) should not be set, see datasheet
+	byte getDeviceStatus();
 
 	void readAll();
 
@@ -228,14 +255,21 @@ public:
 	void clearRxFIFO();
 	void clearFIFO();
 
-	void reset(bool soft = false); // blocking up to ~17 ms depending on mode, also performs boot
-	void softReset(); // blocking, also performs boot
-	void hardReset(); // blocking for ~17 ms, also performs boot
+	// blocking up to ~17 ms depending on mode, also performs boot
+	void reset(bool soft = false);
+	// blocking, also performs boot
+	void softReset();
+	// blocking for ~17 ms, also performs boot
+	void hardReset();
 
-	void turnOn();  // non-blocking - wakeup takes ~17 ms, use isClockReady to check status
-	void turnOff(); // non-blocking
-	bool isClockReady(); // check if oscillator is in ready state
-	void boot(); // sets SPI and pins ready and boots the radio
+	// non-blocking - wakeup takes ~17 ms, use isClockReady to check status
+	void turnOn();
+	// non-blocking
+	void turnOff();
+	// check if oscillator is in ready state
+	bool isClockReady();
+	// sets SPI and pins ready and boots the radio
+	void boot();
 
 	void ChangeRegister(Registers reg, byte value);
 	byte ReadRegister(Registers reg);
