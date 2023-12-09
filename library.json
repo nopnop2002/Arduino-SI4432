@@ -2,7 +2,7 @@
     "name": "Si4432",
     "keywords": "Si4430, Si4431, Si4432",
     "description": "Driver for SILICON LABS SI443x ISM transmitter, tested with module Si4432",
-    "version": "1.1.1",
+    "version": "1.1.2",
     "license": "MIT",
     "frameworks": "Arduino",
     "platforms": "*",

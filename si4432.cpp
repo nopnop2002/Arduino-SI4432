@@ -507,6 +507,11 @@ void Si4432::hardReset() {
 }
 
 void Si4432::reset(bool soft) {
+
+#ifdef DEBUG
+  	Serial.println("resetting Si4432 ...");
+#endif
+
 	if (soft || _sdnPin == 0xFF) {
 		// soft reset command
 		switchMode(Ready);
@@ -516,15 +521,29 @@ void Si4432::reset(bool soft) {
 		turnOff();
 		delay(1);
 		turnOn();
-		delay(17);
+		delay(15);
 	}
 
 	// wait for clock to become ready (changing registers will not work without it)
-	while (!isClockReady()) {
+	int noTimeout = 15; // [ms]
+	while (!isClockReady() && noTimeout) {
 		delay(1);
+		noTimeout--;
 	}
 
-	boot();
+	if (noTimeout)
+	{
+#ifdef DEBUG
+		Serial.println("Si4432 reset successful");
+#endif
+		boot();
+	}
+#ifdef DEBUG
+	else
+	{
+		Serial.println("Si4432 not responding after reset, check wiring");
+	}
+#endif
 }
 
 void Si4432::startListening() {
@@ -660,5 +679,9 @@ byte Si4432::getDeviceStatus()
 
 bool Si4432::isClockReady()
 {
-	return ReadRegister(REG_INT_STATUS2) & 0x02;
+	// notes: - an interrupt status of 0xFF is possible but not probable (see datasheet)
+	//        - the value 0xFF is typically returned when the device is not responding
+	//        - on power up the typical interrupt sequence is 0 -> 1 (ipor) -> 2 (ichiprdy)
+	byte status = ReadRegister(REG_INT_STATUS2);
+	return (status != 0xFF) && (status & 0x02);
 }
