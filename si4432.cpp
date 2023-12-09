@@ -109,7 +109,7 @@ bool Si4432::init(SPIClass* spi, uint32_t spiClock) {
 	_spi->begin();
 
 #ifdef DEBUG
-	Serial.println("SPI is initialized now.");
+	Serial.println("SPI initialized");
 #endif
 
 	reset();
@@ -170,27 +170,27 @@ void Si4432::boot() {
 
 	// backup current settings
 	byte oldTransmitPower = _transmitPower;
-	_transmitPower = 0;
+	_transmitPower = 0xFF;
 	float oldFreqCarrier = _freqCarrier;
 	_freqCarrier = 0;
 	float oldKbps = _kbps;
 	_kbps = 0;
-	uint8_t oldFreqChannel = _freqChannel;
-	_freqChannel = 0;
+	uint16_t oldFreqChannel = _freqChannel;
+	_freqChannel = 0xFFFF;
 
 	if (_configCallback) {
 		_configCallback();
 	}
 
 	// perform missing config
-	if (_transmitPower == 0)
-		setTransmitPower(oldTransmitPower, _directTie); // default max power, direct-tie enabled
+	if (_transmitPower == 0xFF)
+		setTransmitPower(oldTransmitPower, _directTie); // default max power (7), direct-tie enabled
 	if (_freqCarrier == 0)
-  	setFrequency(oldFreqCarrier); // default freq is 433 MHz
+		setFrequency(oldFreqCarrier); // default freq is 433 MHz
 	if (_kbps == 0)
-  	setBaudRate(oldKbps); // default baud rate is 100 kpbs
-	if (_freqChannel == 0)
-	  setChannel(oldFreqChannel); // default channel is 0
+		setBaudRate(oldKbps); // default baud rate is 100 kpbs
+	if (_freqChannel == 0xFFFF)
+		setChannel((byte)oldFreqChannel); // default channel is 0
 
 	switchMode(_idleMode);
 }
@@ -207,8 +207,8 @@ bool Si4432::sendPacket(uint8_t length, const byte* data) {
 			BurstWrite(REG_FIFO, data, length);
 		}
 
-    // enable interrupt for package sent
-    enableInt(INT_PKSENT);
+		// enable interrupt for package sent
+		enableInt(INT_PKSENT);
 
 		// read interrupt registers to clean them
 		getIntStatus();
@@ -272,6 +272,7 @@ void Si4432::getPacketReceived(uint8_t* length, byte* readData) {
 }
 
 void Si4432::setChannel(byte channel) {
+	_freqChannel = channel;
 	ChangeRegister(REG_FREQCHANNEL, channel);
 }
 

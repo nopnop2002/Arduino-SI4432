@@ -282,7 +282,7 @@ protected:
 
 	float _freqCarrier;
 	float _kbps;
-	uint8_t _freqChannel;
+	uint16_t _freqChannel;
 
 	ModulationType _modulationType;
 
