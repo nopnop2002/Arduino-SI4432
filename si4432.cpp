@@ -18,14 +18,10 @@ Si4432::Si4432(uint8_t csPin, uint8_t sdnPin, uint8_t intPin) :
 		_csPin(csPin),
 		_sdnPin(sdnPin),
 		_intPin(intPin),
-		_spi(nullptr),
 		_freqCarrier(433.0),
-		_freqChannel(0),
 		_kbps(100),
-		_packageSign(0xDEAD),
-		_spiClock(0),
+		_freqChannel(0),
 		_modulationType(GFSK),
-		_configCallback(nullptr),
 		_idleMode(Ready),
 		_transmitPower(7),
 		_directTie(true),
@@ -34,7 +30,11 @@ Si4432::Si4432(uint8_t csPin, uint8_t sdnPin, uint8_t intPin) :
 		_packetHandlingEnabled(true),
 		_lsbFirst(false),
 		_sendBlocking(true),
-		_sendStart(0) {
+		_spi(nullptr),
+		_spiClock(0),
+		_packageSign(0xDEAD),
+		_sendStart(0),
+		_configCallback(nullptr) {
 }
 
 void Si4432::setFrequency(int frequency) {
@@ -109,7 +109,7 @@ bool Si4432::init(SPIClass* spi, uint32_t spiClock) {
 	_spi->begin();
 
 #ifdef DEBUG
-	Serial.println("SPI is initialized now.");
+	Serial.println("SPI initialized");
 #endif
 
 	reset();
@@ -170,27 +170,27 @@ void Si4432::boot() {
 
 	// backup current settings
 	byte oldTransmitPower = _transmitPower;
-	_transmitPower = 0;
+	_transmitPower = 0xFF;
 	float oldFreqCarrier = _freqCarrier;
 	_freqCarrier = 0;
 	float oldKbps = _kbps;
 	_kbps = 0;
-	uint8_t oldFreqChannel = _freqChannel;
-	_freqChannel = 0;
+	uint16_t oldFreqChannel = _freqChannel;
+	_freqChannel = 0xFFFF;
 
 	if (_configCallback) {
 		_configCallback();
 	}
 
 	// perform missing config
-	if (_transmitPower == 0)
-		setTransmitPower(oldTransmitPower, _directTie); // default max power, direct-tie enabled
+	if (_transmitPower == 0xFF)
+		setTransmitPower(oldTransmitPower, _directTie); // default max power (7), direct-tie enabled
 	if (_freqCarrier == 0)
-  	setFrequency(oldFreqCarrier); // default freq is 433 MHz
+		setFrequency(oldFreqCarrier); // default freq is 433 MHz
 	if (_kbps == 0)
-  	setBaudRate(oldKbps); // default baud rate is 100 kpbs
-	if (_freqChannel == 0)
-	  setChannel(oldFreqChannel); // default channel is 0
+		setBaudRate(oldKbps); // default baud rate is 100 kpbs
+	if (_freqChannel == 0xFFFF)
+		setChannel((byte)oldFreqChannel); // default channel is 0
 
 	switchMode(_idleMode);
 }
@@ -207,8 +207,8 @@ bool Si4432::sendPacket(uint8_t length, const byte* data) {
 			BurstWrite(REG_FIFO, data, length);
 		}
 
-    // enable interrupt for package sent
-    enableInt(INT_PKSENT);
+		// enable interrupt for package sent
+		enableInt(INT_PKSENT);
 
 		// read interrupt registers to clean them
 		getIntStatus();
@@ -272,6 +272,7 @@ void Si4432::getPacketReceived(uint8_t* length, byte* readData) {
 }
 
 void Si4432::setChannel(byte channel) {
+	_freqChannel = channel;
 	ChangeRegister(REG_FREQCHANNEL, channel);
 }
 
@@ -506,6 +507,11 @@ void Si4432::hardReset() {
 }
 
 void Si4432::reset(bool soft) {
+
+#ifdef DEBUG
+  	Serial.println("resetting Si4432 ...");
+#endif
+
 	if (soft || _sdnPin == 0xFF) {
 		// soft reset command
 		switchMode(Ready);
@@ -515,15 +521,29 @@ void Si4432::reset(bool soft) {
 		turnOff();
 		delay(1);
 		turnOn();
-		delay(17);
+		delay(15);
 	}
 
 	// wait for clock to become ready (changing registers will not work without it)
-	while (!isClockReady()) {
+	int noTimeout = 15; // [ms]
+	while (!isClockReady() && noTimeout) {
 		delay(1);
+		noTimeout--;
 	}
 
-	boot();
+	if (noTimeout)
+	{
+#ifdef DEBUG
+		Serial.println("Si4432 reset successful");
+#endif
+		boot();
+	}
+#ifdef DEBUG
+	else
+	{
+		Serial.println("Si4432 not responding after reset, check wiring");
+	}
+#endif
 }
 
 void Si4432::startListening() {
@@ -659,5 +679,9 @@ byte Si4432::getDeviceStatus()
 
 bool Si4432::isClockReady()
 {
-	return ReadRegister(REG_INT_STATUS2) & 0x02;
+	// notes: - an interrupt status of 0xFF is possible but not probable (see datasheet)
+	//        - the value 0xFF is typically returned when the device is not responding
+	//        - on power up the typical interrupt sequence is 0 -> 1 (ipor) -> 2 (ichiprdy)
+	byte status = ReadRegister(REG_INT_STATUS2);
+	return (status != 0xFF) && (status & 0x02);
 }

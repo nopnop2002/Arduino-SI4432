@@ -1,29 +1,31 @@
 {
-"name": "Si4432",
-"frameworks": "Arduino",
-"keywords": "Si4430, Si4431, Si4432",
-"description": "Implement a driver for SILICON LABS SI443x, tested with module Si4432",
-"authors":
-[
-    {
-        "name": "ahmetipkin",
-        "url": "",
-        "maintainer": false
-    },
-    {
-        "name": "nopnop2002",
-        "url": "",
-        "maintainer": true
-    },
-    {
-        "name": "jensb",
-        "url": "",
-        "maintainer": false
+    "name": "Si4432",
+    "keywords": "Si4430, Si4431, Si4432",
+    "description": "Driver for SILICON LABS SI443x ISM transmitter, tested with module Si4432",
+    "version": "1.1.2",
+    "license": "MIT",
+    "frameworks": "Arduino",
+    "platforms": "*",
+    "headers": "si4432.h",
+    "authors": [
+        {
+            "name": "ahmetipkin",
+            "url": "",
+            "maintainer": false
+        },
+        {
+            "name": "nopnop2002",
+            "url": "",
+            "maintainer": true
+        },
+        {
+            "name": "jensb",
+            "url": "",
+            "maintainer": false
+        }
+    ],
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/nopnop2002/Arduino-SI4432"
     }
-],
-"repository":
-{
-    "type": "git",
-    "url": "https://github.com/nopnop2002/Arduino-SI4432"
-}
 }
