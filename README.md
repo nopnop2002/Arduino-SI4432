@@ -77,3 +77,15 @@ Si4432 is not 5V tolerant. You need to level shift between 5V and 3.3V, e.g. wit
 
 (*3)
 Configurable via constructor.
+
+## Configuration
+
+- Radio frequency   
+	```
+	#define FREQUENCY 433
+	```
+
+- Radio channel   
+	```
+	#define CHANNEL 0
+	```

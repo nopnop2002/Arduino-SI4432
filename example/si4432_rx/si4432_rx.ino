@@ -2,8 +2,18 @@
 
 #define RESPONCE 1
 
+#define FREQUENCY 433
+
+#define CHANNEL 0
+
+// for UNO
 Si4432 radio(10, 7, 2); // CS, SDN, IRQ
 
+// for MEGA
+//Si4432 radio(10, 7, 2); // CS, SDN, IRQ
+
+//for ESP8266
+//Si4432 radio(15, 4, 5); // CS, SDN, IRQ
 
 void setup() {
   delay(1000);
@@ -12,8 +22,10 @@ void setup() {
     Serial.println("SI4432 not installed");
     while(1);
   }
+
+  radio.setFrequency(FREQUENCY);
+  radio.setChannel(CHANNEL);
   radio.setBaudRate(70);
-  radio.setFrequency(433);
   radio.readAll();
 
   radio.startListening();
