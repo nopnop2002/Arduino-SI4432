@@ -649,7 +649,7 @@ void Si4432::setPacketHandling(bool enabled, bool lsbFirst) {
 }
 
 void Si4432::setTransmitPower(byte level) {
-	byte _level = min(level, 7);
+	byte _level = min((int)level, 7);
 	ChangeRegister(REG_TX_POWER, _level);
 }
 
